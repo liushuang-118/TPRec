@@ -129,9 +129,16 @@ class KnowledgeEmbedding(nn.Module):
         # ========================================================
         return bias
 
+    # def _make_distrib(self, distrib):
+    #     """Normalize input numpy vector to distribution."""
+    #     distrib = np.power(np.array(distrib, dtype=np.float), 0.75)
+    #     distrib = distrib / distrib.sum()
+    #     distrib = torch.FloatTensor(distrib).to(self.device)
+    #     return distrib
+
     def _make_distrib(self, distrib):
         """Normalize input numpy vector to distribution."""
-        distrib = np.power(np.array(distrib, dtype=np.float), 0.75)
+        distrib = np.power(np.array(distrib, dtype=float), 0.75)  # 改这里
         distrib = distrib / distrib.sum()
         distrib = torch.FloatTensor(distrib).to(self.device)
         return distrib
