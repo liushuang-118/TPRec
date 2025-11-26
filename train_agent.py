@@ -202,7 +202,7 @@ def main():
     parser.add_argument('--name', type=str, default='train_agent', help='directory name.')
     parser.add_argument('--seed', type=int, default=123, help='random seed.')
     parser.add_argument('--gpu', type=str, default='4', help='gpu device.')
-    parser.add_argument('--epochs', type=int, default=50, help='Max number of epochs.')
+    parser.add_argument('--epochs', type=int, default=1, help='Max number of epochs.')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate.')
     parser.add_argument('--max_acts', type=int, default=250, help='Max number of actions.')
