@@ -149,7 +149,7 @@ def predict_paths(policy_file, path_file, args):
 
 
 def evaluate_paths(path_file, train_labels, test_labels):
-    embeds = load_init_embed(args.dataset)
+    embeds = load_embed(args.dataset)
     # ===================================================
     clus_weight = load_clus_weight(args.dataset, usage='test')
     purchase_matrix = []
