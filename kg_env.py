@@ -68,7 +68,7 @@ class BatchKGEnvironment(object):
         self.act_dim = max_acts + 1  # Add self-loop action, whose act_idx is always 0.
         self.max_num_nodes = max_path_len + 1  # max number of hops (= #nodes - 1)
         self.kg = load_kg(dataset_str)
-        self.embeds = load_embed(dataset_str)
+        self.embeds = load_init_embed(dataset_str)
         self.embed_size = self.embeds[USER].shape[1]
         self.embeds[SELF_LOOP] = (np.zeros(self.embed_size), 0.0) # Add self-loop embed as 0.
         '''state look in paper'''
