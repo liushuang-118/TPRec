@@ -39,19 +39,41 @@ class ActorCritic(nn.Module):
         self.rewards = []
         self.entropy = []
 
+    # def forward(self, inputs):
+    #     state, act_mask = inputs  # state: [bs_32, state_dim_400], act_mask: [bs_32, act_dim_251]
+    #     x = self.l1(state) # [32,400] * [400, 512] -> [32, 512]
+    #     x = F.dropout(F.elu(x), p=0.5)
+    #     out = self.l2(x) # [32, 512] * [512, 256] -> [32, 256]
+    #     x = F.dropout(F.elu(out), p=0.5)
+    #     '''Actor -> Prob'''
+    #     actor_logits = self.actor(x) # [32, 256] * [256, 250 + 1] -> [32, 251]
+    #     actor_logits[1 - act_mask] = -999999.0 
+    #     act_probs = F.softmax(actor_logits, dim=-1)  # Tensor of [bs, act_dim]
+    #     ''' Critic -> Value '''
+    #     # [32, 256] * [256, 1] -> [32, 1]
+    #     state_values = self.critic(x)  # Tensor of [bs, 1] 
+    #     return act_probs, state_values
     def forward(self, inputs):
-        state, act_mask = inputs  # state: [bs_32, state_dim_400], act_mask: [bs_32, act_dim_251]
-        x = self.l1(state) # [32,400] * [400, 512] -> [32, 512]
+        state, act_mask = inputs  
+        x = self.l1(state)  
         x = F.dropout(F.elu(x), p=0.5)
-        out = self.l2(x) # [32, 512] * [512, 256] -> [32, 256]
+        out = self.l2(x)  
         x = F.dropout(F.elu(out), p=0.5)
-        '''Actor -> Prob'''
-        actor_logits = self.actor(x) # [32, 256] * [256, 250 + 1] -> [32, 251]
-        actor_logits[1 - act_mask] = -999999.0 
-        act_probs = F.softmax(actor_logits, dim=-1)  # Tensor of [bs, act_dim]
-        ''' Critic -> Value '''
-        # [32, 256] * [256, 1] -> [32, 1]
-        state_values = self.critic(x)  # Tensor of [bs, 1] 
+        
+        # Actor 网络：计算动作的 logits
+        actor_logits = self.actor(x)       
+        # 确保 act_mask 是布尔类型
+        act_mask_bool = act_mask.bool()  
+        
+        # 将无效动作的 logits 设置为非常小的值
+        actor_logits[~act_mask_bool] = -1e9
+        
+        # 计算动作概率
+        act_probs = F.softmax(actor_logits, dim=-1)  
+        
+        # Critic 网络：计算状态值
+        state_values = self.critic(x)  
+        
         return act_probs, state_values
 
     def select_action(self, batch_state, batch_act_mask, device):
