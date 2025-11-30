@@ -148,6 +148,73 @@ def predict_paths(policy_file, path_file, args):
     pickle.dump(predicts, open(path_file, 'wb'))
 
 
+# ----------------------------
+# New: sample train-user paths (stochastic sampling using learned policy)
+# ----------------------------
+def sample_train_paths_for_faithfulness(policy_file, out_path, args, num_users=50, num_paths=1000):
+    """
+    Sample training paths for faithfulness.
+    Each path ends at PRODUCT nodes, and each step has a probability.
+    Save result as {'paths': [...], 'probs': [[p1, p2,...], ...]}.
+    """
+    import copy, os, pickle, random
+    from tqdm import tqdm
+    import torch
+    import numpy as np
+
+    print("Sampling training paths for faithfulness (this may take a while)...")
+    env = BatchKGEnvironment(args.dataset, args.max_acts, max_path_len=args.max_path_len, state_history=args.state_history)
+    pretrain_sd = torch.load(policy_file, map_location=lambda s, l: s)
+    model = ActorCritic(env.state_dim, env.act_dim, gamma=args.gamma, hidden_sizes=args.hidden).to(args.device)
+    model_sd = model.state_dict()
+    model_sd.update(pretrain_sd)
+    model.load_state_dict(model_sd)
+    model.eval()
+
+    train_labels = load_labels(args.dataset, 'train')
+    train_uids = list(train_labels.keys())
+    if len(train_uids) == 0:
+        raise RuntimeError("Train user list empty.")
+
+    sampled_uids = random.sample(train_uids, min(num_users, len(train_uids)))
+    print(f"Selected {len(sampled_uids)} train users to sample.")
+
+    all_paths, all_probs = [], []
+
+    with torch.no_grad():
+        for uid in tqdm(sampled_uids):
+            model.saved_actions = []
+            model.rewards = []
+            model.entropy = []
+
+            user_paths = 0
+            while user_paths < num_paths:
+                state = env.reset([uid])
+                done = False
+                path_probs = []
+
+                while not done:
+                    act_mask = env.batch_action_mask(dropout=0.0)
+                    action_list = model.select_action([state[0]], [act_mask[0]], args.device)
+                    state, reward, done = env.batch_step([action_list[0]])
+                    # 保存每一步的概率
+                    path_probs.append(model.saved_actions[-1].log_prob.exp().item())
+
+                path = copy.deepcopy(env._batch_path[0])
+                if path[-1][1] == PRODUCT:
+                    all_paths.append(path)
+                    all_probs.append(path_probs)
+                    user_paths += 1
+
+            model.saved_actions = []
+            model.rewards = []
+            model.entropy = []
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'wb') as f:
+        pickle.dump({'paths': all_paths, 'probs': all_probs}, f)
+
+
 def evaluate_paths(path_file, train_labels, test_labels):
     embeds = load_embed(args.dataset)
     # ===================================================
@@ -227,6 +294,7 @@ def evaluate_paths(path_file, train_labels, test_labels):
 def test(args):
     policy_file = args.log_dir + '/policy_model_epoch_{}.ckpt'.format(args.epochs)
     path_file = args.log_dir + '/policy_paths_epoch_{}.pkl'.format(args.epochs)
+    train_sampled_file = os.path.join(args.log_dir, 'train_sampled_paths.pkl')
 
     train_labels = load_labels(args.dataset, 'train')
     test_labels = load_labels(args.dataset, 'test')
@@ -235,8 +303,36 @@ def test(args):
         predict_paths(policy_file, path_file, args)
     if args.run_eval:
         evaluate_paths(path_file, train_labels, test_labels)
+    if args.sample_train_faith:
+        # sample and save train paths
+        sample_train_paths_for_faithfulness(policy_file, train_sampled_file, args,
+                                           num_users=args.num_train_users,
+                                           num_paths=args.num_paths_per_user)
 
+# if __name__ == '__main__':
+#     boolean = lambda x: (str(x).lower() == 'true')
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--dataset', type=str, default=BEAUTY, help='One of {cloth, beauty, cell, cd}')
+#     parser.add_argument('--name', type=str, default='train_agent', help='directory name.')
+#     parser.add_argument('--seed', type=int, default=123, help='random seed.')
+#     parser.add_argument('--gpu', type=str, default='0', help='gpu device.')
+#     parser.add_argument('--epochs', type=int, default=1, help='num of epochs.')
+#     parser.add_argument('--max_acts', type=int, default=150, help='Max number of actions.')
+#     parser.add_argument('--max_path_len', type=int, default=3, help='Max path length.')
+#     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor.')
+#     parser.add_argument('--state_history', type=int, default=1, help='state history length')
+#     parser.add_argument('--hidden', type=int, nargs='*', default=[512, 256], help='number of samples')
+#     parser.add_argument('--add_products', type=boolean, default=False, help='Add predicted products up to 10')
+#     parser.add_argument('--topk', type=int, nargs='*', default=[25, 5, 1], help='number of samples')
+#     parser.add_argument('--run_path', type=boolean, default=True, help='Generate predicted path? (takes long time)')
+#     parser.add_argument('--run_eval', type=boolean, default=True, help='Run evaluation?')
+#     args = parser.parse_args()
 
+#     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+#     args.device = torch.device('cuda:0') if torch.cuda.is_available() else 'cpu'
+
+#     args.log_dir = TMP_DIR[args.dataset] + '/' + args.name
+#     test(args)
 if __name__ == '__main__':
     boolean = lambda x: (str(x).lower() == 'true')
     parser = argparse.ArgumentParser()
@@ -244,21 +340,29 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str, default='train_agent', help='directory name.')
     parser.add_argument('--seed', type=int, default=123, help='random seed.')
     parser.add_argument('--gpu', type=str, default='0', help='gpu device.')
-    parser.add_argument('--epochs', type=int, default=1, help='num of epochs.')
-    parser.add_argument('--max_acts', type=int, default=150, help='Max number of actions.')
+    parser.add_argument('--epochs', type=int, default=50, help='num of epochs.')
+    parser.add_argument('--max_acts', type=int, default=250, help='Max number of actions.')
     parser.add_argument('--max_path_len', type=int, default=3, help='Max path length.')
     parser.add_argument('--gamma', type=float, default=0.99, help='reward discount factor.')
     parser.add_argument('--state_history', type=int, default=1, help='state history length')
     parser.add_argument('--hidden', type=int, nargs='*', default=[512, 256], help='number of samples')
     parser.add_argument('--add_products', type=boolean, default=False, help='Add predicted products up to 10')
-    parser.add_argument('--topk', type=int, nargs='*', default=[25, 5, 1], help='number of samples')
+    parser.add_argument('--topk', type=int, nargs='*', default=[25, 5, 1], help='beam sizes')
     parser.add_argument('--run_path', type=boolean, default=True, help='Generate predicted path? (takes long time)')
     parser.add_argument('--run_eval', type=boolean, default=True, help='Run evaluation?')
+    # New args for faithfulness sampling
+    parser.add_argument('--sample_train_faith', type=boolean, default=True,
+                        help='If true, sample train users paths for faithfulness (50 users x 1000 paths by default)')
+    parser.add_argument('--num_train_users', type=int, default=50, help='Number of train users to sample')
+    parser.add_argument('--num_paths_per_user', type=int, default=1000, help='Number of paths per train user to sample')
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     args.device = torch.device('cuda:0') if torch.cuda.is_available() else 'cpu'
 
     args.log_dir = TMP_DIR[args.dataset] + '/' + args.name
+    if not os.path.isdir(args.log_dir):
+        os.makedirs(args.log_dir)
+
     test(args)
 
